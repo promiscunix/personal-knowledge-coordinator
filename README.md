@@ -12,6 +12,14 @@ This repository is the first working skeleton. It intentionally starts with a sm
 
 This repository is for building a new configuration for a different computer. The current NixOS machine is being inspected as a reference source only. Do not treat this as permission to update the current machine's `/home/damajha/nixfiles` configuration or live Hermes service.
 
+The target-machine flake entry is:
+
+```bash
+sudo nixos-rebuild switch --flake .#knowledge-node
+```
+
+Read `INSTALL.md` before first use so the target machine's generated `hardware-configuration.nix` replaces the placeholder.
+
 ## Current status
 
 Implemented prototype slice:
@@ -23,21 +31,22 @@ Implemented prototype slice:
 - Assignment and creation activity are stored durably.
 - A management-private Tom callbacks conversation path is covered in tests to prove scope separation is part of the schema from the start.
 
-The current runnable prototype uses a repository-local SQLite adapter for fast tests and demos. The documented production target for the new computer is PostgreSQL with row-level/security-aware scopes; see `DATABASE.md` and `SECURITY.md`.
+The target-machine configuration enables PostgreSQL, a local `pkc-api` capture service, the `pkc` CLI, the official Hermes Agent NixOS module, role accounts for the specialist agents, and nightly PostgreSQL backups. Local tests still use SQLite where useful because they are fast and disposable.
 
 ## Quick demo
 
 ```bash
-nix develop
-python -m pkc.cli --db data/knowledge.sqlite3 init-db
-python -m pkc.cli --db data/knowledge.sqlite3 capture "I don't like the UI for the Parts Advisor page in part-suite."
-python -m pkc.cli --db data/knowledge.sqlite3 inbox
+nix run .#pkc -- --db data/knowledge.sqlite3 init-db
+nix run .#pkc -- --db data/knowledge.sqlite3 capture "I don't like the UI for the Parts Advisor page in part-suite."
+nix run .#pkc -- --db data/knowledge.sqlite3 inbox
 ```
 
 ## Test
 
 ```bash
 nix develop --command python -m pytest -q
+nix flake check
+nix build .#nixosConfigurations.knowledge-node.config.system.build.toplevel --no-link --print-out-paths
 ```
 
 ## Non-goals for the initial slice

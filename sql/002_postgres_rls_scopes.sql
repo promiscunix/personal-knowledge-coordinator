@@ -1,0 +1,14 @@
+-- Planned row-level-security direction.
+-- Not enabled by default yet because the first service uses one trusted pkc DB role.
+-- The next hardening step is to split DB roles by agent class and enable these policies.
+
+-- Example future direction:
+-- ALTER TABLE raw_captures ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY coordinator_all_raw_captures ON raw_captures
+--   FOR ALL TO pkc_coordinator USING (true) WITH CHECK (true);
+-- CREATE POLICY developer_project_scoped_raw_captures ON raw_captures
+--   FOR SELECT TO pkc_developer
+--   USING (privacy_scope = 'general/shared' OR privacy_scope LIKE 'project:%');
+-- CREATE POLICY no_management_private_for_developer ON raw_captures
+--   FOR SELECT TO pkc_developer
+--   USING (privacy_scope <> 'management-private');

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from .app import CaptureService, KnowledgeStore
@@ -9,7 +10,7 @@ from .app import CaptureService, KnowledgeStore
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pkc", description="Personal knowledge coordinator prototype")
-    parser.add_argument("--db", default="data/knowledge.sqlite3", help="SQLite prototype DB path")
+    parser.add_argument("--db", default=None, help="SQLite DB path. Omit to use PKC_DATABASE_URL or data/knowledge.sqlite3.")
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("init-db", help="Initialize the prototype database")
@@ -29,11 +30,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    store = KnowledgeStore(Path(args.db))
+    store = KnowledgeStore.from_env(Path(args.db) if args.db else None)
 
     if args.command == "init-db":
         store.initialize()
-        print(f"initialized {args.db}")
+        target = os.environ.get("PKC_DATABASE_URL") or str(store.db_path)
+        print(f"initialized {target}")
         return 0
 
     store.initialize()

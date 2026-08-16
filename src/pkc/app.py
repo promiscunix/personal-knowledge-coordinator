@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from types import TracebackType
+from typing import Any, Self
 
 TASK_OPEN_STATUSES = ("captured", "classified", "queued", "working", "blocked", "waiting_on_user", "ready_for_review")
 
@@ -20,8 +22,40 @@ def new_id() -> str:
     return str(uuid.uuid4())
 
 
-def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
+def row_to_dict(row: Any | None) -> dict[str, Any] | None:
     return None if row is None else dict(row)
+
+
+class ConnectionAdapter:
+    def __init__(self, raw: Any, dialect: str):
+        self.raw = raw
+        self.dialect = dialect
+
+    def __enter__(self) -> Self:
+        self.raw.__enter__()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool | None:
+        return self.raw.__exit__(exc_type, exc, tb)
+
+    def execute(self, sql: str, params: tuple[Any, ...] = ()) -> Any:
+        if self.dialect == "postgresql":
+            sql = sql.replace("?", "%s")
+        return self.raw.execute(sql, params)
+
+    def executescript(self, sql: str) -> None:
+        if self.dialect == "sqlite":
+            self.raw.executescript(sql)
+            return
+        for statement in sql.split(";"):
+            statement = statement.strip()
+            if statement:
+                self.raw.execute(statement)
 
 
 @dataclass
@@ -41,19 +75,34 @@ class KnowledgeStore:
     while tests and local demos remain cheap and disposable.
     """
 
-    def __init__(self, db_path: str | Path):
-        self.db_path = Path(db_path)
+    def __init__(self, db_path: str | Path | None = None, database_url: str | None = None):
+        self.database_url = database_url
+        self.db_path = Path(db_path) if db_path is not None else Path("data/knowledge.sqlite3")
 
-    def connect(self) -> sqlite3.Connection:
+    @classmethod
+    def from_env(cls, db_path: str | Path | None = None) -> KnowledgeStore:
+        database_url = os.environ.get("PKC_DATABASE_URL")
+        if database_url:
+            return cls(database_url=database_url)
+        return cls(db_path or os.environ.get("PKC_SQLITE_PATH", "data/knowledge.sqlite3"))
+
+    def connect(self) -> ConnectionAdapter:
+        if self.database_url:
+            try:
+                import psycopg
+                from psycopg.rows import dict_row
+            except ImportError as exc:  # pragma: no cover - exercised on target NixOS package
+                raise RuntimeError("PostgreSQL mode requires psycopg") from exc
+            return ConnectionAdapter(psycopg.connect(self.database_url, row_factory=dict_row), "postgresql")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
-        return conn
+        return ConnectionAdapter(conn, "sqlite")
 
     def initialize(self) -> None:
         with self.connect() as conn:
-            conn.executescript(SCHEMA_SQL)
+            conn.executescript(POSTGRES_SCHEMA_SQL if self.database_url else SCHEMA_SQL)
 
     def insert_raw_capture(
         self,
@@ -122,7 +171,7 @@ class KnowledgeStore:
                     (id, summary, kind, privacy_scope, project_id, source_capture_id, confidence, verified, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (observation_id, summary, kind, privacy_scope, project_id, source_capture_id, confidence, int(verified), now_iso()),
+                (observation_id, summary, kind, privacy_scope, project_id, source_capture_id, confidence, verified, now_iso()),
             )
             self._event(conn, "observation", observation_id, "created", summary, agent)
         return observation_id
@@ -258,7 +307,7 @@ class KnowledgeStore:
             ).fetchall()
             return [dict(row) for row in rows]
 
-    def _event(self, conn: sqlite3.Connection, entity_type: str, entity_id: str, event_type: str, message: str, actor: str) -> None:
+    def _event(self, conn: ConnectionAdapter, entity_type: str, entity_id: str, event_type: str, message: str, actor: str) -> None:
         conn.execute(
             """
             INSERT INTO activity_events (id, entity_type, entity_id, event_type, message, actor, occurred_at, metadata_json)
@@ -433,6 +482,100 @@ CREATE TABLE IF NOT EXISTS activity_events (
     actor TEXT NOT NULL,
     occurred_at TEXT NOT NULL,
     metadata_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_raw_captures_scope ON raw_captures(privacy_scope);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_scope ON tasks(privacy_scope);
+CREATE INDEX IF NOT EXISTS idx_activity_entity ON activity_events(entity_type, entity_id);
+"""
+
+
+POSTGRES_SCHEMA_SQL = """
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TABLE IF NOT EXISTS raw_captures (
+    id uuid PRIMARY KEY,
+    raw_text text NOT NULL,
+    source_type text NOT NULL,
+    source_ref text,
+    source_vault text,
+    captured_at timestamptz NOT NULL,
+    captured_by text NOT NULL,
+    privacy_scope text NOT NULL,
+    verified boolean NOT NULL DEFAULT false,
+    confidence double precision NOT NULL DEFAULT 1.0
+);
+
+CREATE TABLE IF NOT EXISTS projects (
+    id uuid PRIMARY KEY,
+    slug text NOT NULL UNIQUE,
+    name text NOT NULL,
+    created_at timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS people (
+    id uuid PRIMARY KEY,
+    display_name text NOT NULL,
+    normalized_name text NOT NULL UNIQUE,
+    created_at timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS observations (
+    id uuid PRIMARY KEY,
+    summary text NOT NULL,
+    kind text NOT NULL,
+    privacy_scope text NOT NULL,
+    project_id uuid REFERENCES projects(id),
+    source_capture_id uuid NOT NULL REFERENCES raw_captures(id),
+    confidence double precision NOT NULL,
+    verified boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id uuid PRIMARY KEY,
+    person_id uuid NOT NULL REFERENCES people(id),
+    issue text NOT NULL,
+    attributed_explanation text,
+    privacy_scope text NOT NULL,
+    source_capture_id uuid NOT NULL REFERENCES raw_captures(id),
+    occurred_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS commitments (
+    id uuid PRIMARY KEY,
+    person_id uuid REFERENCES people(id),
+    summary text NOT NULL,
+    status text NOT NULL,
+    privacy_scope text NOT NULL,
+    source_capture_id uuid NOT NULL REFERENCES raw_captures(id),
+    created_at timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id uuid PRIMARY KEY,
+    title text NOT NULL,
+    description text NOT NULL,
+    status text NOT NULL,
+    privacy_scope text NOT NULL,
+    project_id uuid REFERENCES projects(id),
+    source_capture_id uuid NOT NULL REFERENCES raw_captures(id),
+    assigned_agent text,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS activity_events (
+    id uuid PRIMARY KEY,
+    entity_type text NOT NULL,
+    entity_id uuid NOT NULL,
+    event_type text NOT NULL,
+    message text NOT NULL,
+    actor text NOT NULL,
+    occurred_at timestamptz NOT NULL,
+    metadata_json jsonb NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_raw_captures_scope ON raw_captures(privacy_scope);
