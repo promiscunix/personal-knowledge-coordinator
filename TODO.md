@@ -2,10 +2,10 @@
 
 ## Immediate
 
-- [x] Inspect current NixOS/Hermes environment.
+- [x] Inspect current NixOS/Hermes environment as a reference host only.
 - [x] Create isolated project repository.
 - [x] Prove first vertical slice in tests and CLI prototype.
-- [ ] Add PostgreSQL migration runner and NixOS module proposal.
+- [ ] Add PostgreSQL migration runner and NixOS module proposal for the new target computer, not the current host.
 - [ ] Add scope-aware retrieval API.
 - [ ] Sync project/delegation tasks to Hermes Kanban.
 - [ ] Add reminder/date extraction.

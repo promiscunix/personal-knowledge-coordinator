@@ -12,7 +12,9 @@ Migration comes after the core capture/storage/retrieval model is validated.
 - Detect near duplicates and same-topic notes without merging away differences.
 - Preserve conflicts and time-dependent changes instead of flattening them into one false current fact.
 
-## Known local sources from host inspection
+## Known local sources from reference-host inspection
+
+These are historical/source locations observed on the reference machine. They are not to be modified in place during initial migration.
 
 - `/home/damajha/Documents/Obsidian Vault`
 - `/home/damajha/vaults/promiscunix`

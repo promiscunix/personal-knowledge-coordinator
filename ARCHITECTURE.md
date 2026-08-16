@@ -1,8 +1,14 @@
 # Architecture
 
-## Inspection summary from the initial host
+## Scope clarification
 
-Host inspected: `theBullpen`, NixOS 26.11, flakes enabled, current working repo `/home/damajha/nixfiles`.
+This project is **not** an in-place update to the currently inspected machine's NixOS configuration. The current machine is a reference/inspection host only. The deliverable is a new, clean configuration for a different computer, following the user's detailed guidelines for a centralized Hermes-based personal knowledge, task, and multi-agent coordination system.
+
+Do not modify `/home/damajha/nixfiles` or the current host's live NixOS/Hermes service as part of this repository unless the user explicitly authorizes that later. Machine inspection findings are used to understand existing Hermes state, migration sources, and design constraints.
+
+## Inspection summary from the reference host
+
+Reference host inspected: `theBullpen`, NixOS 26.11, flakes enabled, current working repo `/home/damajha/nixfiles`.
 
 Hermes Agent:
 
@@ -58,7 +64,7 @@ The model context window is not the database. Agents retrieve only context requi
 
 ## Initial implementation choice
 
-The production target remains PostgreSQL. The first prototype uses a simple SQLite adapter only to prove the vertical slice and test behavior before enabling system PostgreSQL and writing migrations. This avoids changing machine services before the schema and workflow are validated.
+The production target remains PostgreSQL on the new target computer. The first prototype uses a simple SQLite adapter only to prove the vertical slice and test behavior before writing the target-machine PostgreSQL/NixOS configuration. This avoids accidentally changing services on the reference host.
 
 ## Hermes integration plan
 

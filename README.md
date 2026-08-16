@@ -8,6 +8,10 @@ Guiding principle:
 
 This repository is the first working skeleton. It intentionally starts with a small vertical slice rather than a giant speculative system.
 
+## Scope
+
+This repository is for building a new configuration for a different computer. The current NixOS machine is being inspected as a reference source only. Do not treat this as permission to update the current machine's `/home/damajha/nixfiles` configuration or live Hermes service.
+
 ## Current status
 
 Implemented prototype slice:
@@ -19,7 +23,7 @@ Implemented prototype slice:
 - Assignment and creation activity are stored durably.
 - A management-private Tom callbacks conversation path is covered in tests to prove scope separation is part of the schema from the start.
 
-The current runnable prototype uses a repository-local SQLite adapter for fast tests and demos. The documented production target is PostgreSQL with row-level/security-aware scopes; see `DATABASE.md` and `SECURITY.md`.
+The current runnable prototype uses a repository-local SQLite adapter for fast tests and demos. The documented production target for the new computer is PostgreSQL with row-level/security-aware scopes; see `DATABASE.md` and `SECURITY.md`.
 
 ## Quick demo
 
