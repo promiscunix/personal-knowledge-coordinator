@@ -1,0 +1,9 @@
+[project]
+name = "personal-knowledge-coordinator"
+version = "0.1.0"
+description = "Central personal knowledge, task, and multi-agent coordination system around Hermes Agent."
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
