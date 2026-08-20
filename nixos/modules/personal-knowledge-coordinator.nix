@@ -47,12 +47,13 @@ in
     });
 
     systemd.tmpfiles.rules = [
-      "d ${cfg.stateDir} 0750 pkc pkc -"
+      "d ${cfg.stateDir} 0750 pkc hermes-agents -"
       "d ${cfg.stateDir}/archive 0750 pkc pkc -"
       "d ${cfg.stateDir}/exports 0750 pkc pkc -"
       "d ${cfg.stateDir}/backups 0750 pkc pkc -"
       "d ${cfg.stateDir}/backups/postgresql 0750 postgres postgres -"
       "d ${cfg.stateDir}/hermes 0750 coordinator hermes-agents -"
+      "d ${cfg.stateDir}/workspace 0750 coordinator hermes-agents -"
       "d ${cfg.stateDir}/agents 0750 root hermes-agents -"
     ] ++ map (role: "d ${cfg.stateDir}/agents/${role} 0750 ${role} hermes-agents -") roles;
 
