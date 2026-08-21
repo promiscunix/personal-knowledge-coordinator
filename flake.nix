@@ -15,7 +15,7 @@
       pkgs = import nixpkgs { inherit system; };
       pkcPython = pkgs.python312.withPackages (ps: with ps; [ pytest psycopg ]);
       pkcEnv = ''
-        export PYTHONPATH=${self}/src:$PYTHONPATH
+        export PYTHONPATH=${self}/src:''${PYTHONPATH:-}
       '';
     in
     {
@@ -54,7 +54,7 @@
       devShells.${system}.default = pkgs.mkShell {
         packages = [ pkcPython pkgs.postgresql_16 pkgs.sqlite pkgs.ruff pkgs.nixpkgs-fmt pkgs.gh ];
         shellHook = ''
-          export PYTHONPATH="$PWD/src:$PYTHONPATH"
+          export PYTHONPATH="$PWD/src:''${PYTHONPATH:-}"
         '';
       };
 

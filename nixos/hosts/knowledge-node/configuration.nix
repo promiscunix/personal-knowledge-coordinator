@@ -4,6 +4,8 @@
     self.nixosModules.personal-knowledge-coordinator
     ./hardware-configuration.nix
   ];
+  boot.loader.systemd-boot.enable = true;
+  boot.loader.efi.canTouchEfiVariables = true;
 
   networking.hostName = "knowledge-node";
   time.timeZone = lib.mkDefault "America/Toronto";
@@ -15,6 +17,7 @@
   services.personal-knowledge-coordinator = {
     enable = true;
     stateDir = "/srv/personal-knowledge-coordinator";
+    secretsFile = "/etc/pkc/hermes-env";
     databaseName = "pkc";
     databaseUser = "pkc";
     listenHost = "127.0.0.1";
