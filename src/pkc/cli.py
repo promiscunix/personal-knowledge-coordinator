@@ -9,6 +9,10 @@ from .app import CaptureService, KnowledgeStore
 from .migrations import MigrationRunner, default_migrations_dir
 
 
+def json_output(payload: object) -> str:
+    return json.dumps(payload, indent=2, sort_keys=True, default=str)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pkc", description="Personal knowledge coordinator prototype")
     parser.add_argument("--db", default=None, help="SQLite DB path. Omit to use PKC_DATABASE_URL or data/knowledge.sqlite3.")
@@ -24,6 +28,41 @@ def build_parser() -> argparse.ArgumentParser:
         default=default_migrations_dir(),
         help="Directory containing ordered .sql migration files",
     )
+
+    quote = sub.add_parser("quote", help="Capture and retrieve quotes")
+    quote_sub = quote.add_subparsers(dest="quote_command", required=True)
+    quote_add = quote_sub.add_parser("add")
+    quote_add.add_argument("--text", required=True)
+    quote_add.add_argument("--speaker")
+    quote_add.add_argument("--source")
+    quote_add.add_argument("--locator")
+    quote_add.add_argument("--attribution-confidence", type=int, default=50)
+    quote_add.add_argument("--attribution-status", default="unknown")
+    quote_add.add_argument("--privacy-scope", default="personal")
+    quote_add.add_argument("--raw-text")
+    quote_add.add_argument("--json", action="store_true")
+    quote_list = quote_sub.add_parser("list")
+    quote_list.add_argument("--query", default="")
+    quote_list.add_argument("--limit", type=int, default=20)
+    quote_list.add_argument("--json", action="store_true")
+    quote_show = quote_sub.add_parser("show")
+    quote_show.add_argument("quote_id")
+    quote_show.add_argument("--json", action="store_true")
+
+    lesson = sub.add_parser("lesson", help="Capture and retrieve life lessons")
+    lesson_sub = lesson.add_subparsers(dest="lesson_command", required=True)
+    lesson_add = lesson_sub.add_parser("add")
+    lesson_add.add_argument("--text", required=True)
+    lesson_add.add_argument("--privacy-scope", default="personal")
+    lesson_add.add_argument("--raw-text")
+    lesson_add.add_argument("--json", action="store_true")
+    lesson_list = lesson_sub.add_parser("list")
+    lesson_list.add_argument("--query", default="")
+    lesson_list.add_argument("--limit", type=int, default=20)
+    lesson_list.add_argument("--json", action="store_true")
+    lesson_show = lesson_sub.add_parser("show")
+    lesson_show.add_argument("lesson_id")
+    lesson_show.add_argument("--json", action="store_true")
 
     capture = sub.add_parser("capture", help="Capture a natural-language input")
     capture.add_argument("text", help="Raw text to capture verbatim")
@@ -62,6 +101,28 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     store.initialize()
+    if args.command == "quote":
+        service = CaptureService(store)
+        if args.quote_command == "add":
+            result = service.capture_quote(exact_text=args.text, speaker=args.speaker, source_label=args.source, source_locator=args.locator, attribution_confidence=args.attribution_confidence, attribution_status=args.attribution_status, privacy_scope=args.privacy_scope, raw_text=args.raw_text)
+            payload = {"capture_id": result.capture_id, "quote_id": result.record_id}
+        elif args.quote_command == "list":
+            payload = store.list_quotes(args.query, args.limit)
+        else:
+            payload = store.get_quote(args.quote_id)
+        print(json_output(payload))
+        return 0
+    if args.command == "lesson":
+        service = CaptureService(store)
+        if args.lesson_command == "add":
+            result = service.capture_life_lesson(lesson_text=args.text, privacy_scope=args.privacy_scope, raw_text=args.raw_text)
+            payload = {"capture_id": result.capture_id, "life_lesson_id": result.record_id}
+        elif args.lesson_command == "list":
+            payload = store.list_life_lessons(args.query, args.limit)
+        else:
+            payload = store.get_life_lesson(args.lesson_id)
+        print(json_output(payload))
+        return 0
     if args.command == "capture":
         result = CaptureService(store).capture(args.text)
         payload = {
@@ -72,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
             "commitment_ids": result.commitment_ids,
         }
         if args.json:
-            print(json.dumps(payload, indent=2, sort_keys=True))
+            print(json_output(payload))
         else:
             print(f"captured: {result.capture_id}")
             for task_id in result.task_ids:
@@ -96,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         events = store.activity_for("task", args.task_id)
         payload = {"task": task, "activity": events}
         if args.json:
-            print(json.dumps(payload, indent=2, sort_keys=True))
+            print(json_output(payload))
         else:
             print(f"{task['title']} ({task['status']})")
             print(task["description"])
