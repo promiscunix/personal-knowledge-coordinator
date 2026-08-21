@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 from .app import CaptureService, KnowledgeStore
+from .migrations import MigrationRunner, default_migrations_dir
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -14,6 +15,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("init-db", help="Initialize the prototype database")
+
+    migrate = sub.add_parser("migrate", help="Apply ordered database migrations")
+    migrate.add_argument("--check", action="store_true", help="List pending migrations without applying them")
+    migrate.add_argument(
+        "--migrations-dir",
+        type=Path,
+        default=default_migrations_dir(),
+        help="Directory containing ordered .sql migration files",
+    )
 
     capture = sub.add_parser("capture", help="Capture a natural-language input")
     capture.add_argument("text", help="Raw text to capture verbatim")
@@ -31,6 +41,19 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     store = KnowledgeStore.from_env(Path(args.db) if args.db else None)
+
+    if args.command == "migrate":
+        runner = MigrationRunner(store, args.migrations_dir)
+        if args.check:
+            pending = runner.pending()
+            if not pending:
+                print("No pending migrations.")
+            for migration in pending:
+                print(f"pending: {migration.version}")
+            return 0
+        for version in runner.apply():
+            print(f"applied: {version}")
+        return 0
 
     if args.command == "init-db":
         store.initialize()
