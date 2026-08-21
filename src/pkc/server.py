@@ -4,7 +4,7 @@ import json
 import os
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .app import CaptureService, KnowledgeStore
 
@@ -25,24 +25,62 @@ class CoordinatorHandler(BaseHTTPRequestHandler):
             self.store.initialize()
             self._json(self.store.inbox())
             return
+        query = parse_qs(urlparse(self.path).query)
+        if path in {"/quotes", "/life-lessons"}:
+            try:
+                limit = int(query.get("limit", ["20"])[0])
+                if not 1 <= limit <= 100:
+                    raise ValueError
+            except ValueError:
+                self.send_error(HTTPStatus.BAD_REQUEST, "limit must be 1..100")
+                return
+            self.store.initialize()
+            records = self.store.list_quotes(query.get("query", [""])[0], limit) if path == "/quotes" else self.store.list_life_lessons(query.get("query", [""])[0], limit)
+            self._json(records)
+            return
+        for prefix, getter in (("/quotes/", self.store.get_quote), ("/life-lessons/", self.store.get_life_lesson)):
+            if path.startswith(prefix):
+                self.store.initialize()
+                record = getter(path.removeprefix(prefix))
+                if record is None:
+                    self.send_error(HTTPStatus.NOT_FOUND, "not found")
+                else:
+                    self._json(record)
+                return
         self.send_error(HTTPStatus.NOT_FOUND, "not found")
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path != "/capture":
+        if path not in {"/capture", "/quotes", "/life-lessons"}:
             self.send_error(HTTPStatus.NOT_FOUND, "not found")
             return
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length) if length else b"{}"
         try:
             payload = json.loads(body.decode("utf-8"))
-            text = payload["text"]
-        except (json.JSONDecodeError, KeyError, TypeError):
-            self.send_error(HTTPStatus.BAD_REQUEST, "expected JSON body with text")
+            if not isinstance(payload, dict):
+                raise ValueError
+        except (json.JSONDecodeError, ValueError):
+            self.send_error(HTTPStatus.BAD_REQUEST, "expected JSON object")
             return
 
         self.store.initialize()
-        result = CaptureService(self.store).capture(text)
+        service = CaptureService(self.store)
+        try:
+            if path == "/quotes":
+                result = service.capture_quote(
+                    exact_text=payload["exact_text"], speaker=payload.get("speaker"), source_label=payload.get("source_label"), source_locator=payload.get("source_locator"), attribution_confidence=payload.get("attribution_confidence", 50), attribution_status=payload.get("attribution_status", "unknown"), privacy_scope=payload.get("privacy_scope", "personal"), raw_text=payload.get("raw_text"),
+                )
+                self._json({"capture_id": result.capture_id, "quote_id": result.record_id}, status=HTTPStatus.CREATED)
+                return
+            if path == "/life-lessons":
+                result = service.capture_life_lesson(lesson_text=payload["lesson_text"], privacy_scope=payload.get("privacy_scope", "personal"), raw_text=payload.get("raw_text"))
+                self._json({"capture_id": result.capture_id, "life_lesson_id": result.record_id}, status=HTTPStatus.CREATED)
+                return
+            result = service.capture(payload["text"])
+        except (KeyError, TypeError, ValueError):
+            self.send_error(HTTPStatus.BAD_REQUEST, "invalid capture payload")
+            return
         self._json(
             {
                 "capture_id": result.capture_id,

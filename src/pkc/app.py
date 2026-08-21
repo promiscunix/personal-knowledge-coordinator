@@ -59,6 +59,12 @@ class ConnectionAdapter:
 
 
 @dataclass
+class StructuredCaptureResult:
+    capture_id: str
+    record_id: str
+
+
+@dataclass
 class CaptureResult:
     capture_id: str
     observation_ids: list[str] = field(default_factory=list)
@@ -270,6 +276,32 @@ class KnowledgeStore:
         with self.connect() as conn:
             return row_to_dict(conn.execute("SELECT * FROM observations WHERE id = ?", (observation_id,)).fetchone())  # type: ignore[return-value]
 
+    def get_quote(self, quote_id: str) -> dict[str, Any]:
+        with self.connect() as conn:
+            return row_to_dict(conn.execute("SELECT * FROM quotes WHERE id = ?", (quote_id,)).fetchone())  # type: ignore[return-value]
+
+    def get_life_lesson(self, lesson_id: str) -> dict[str, Any]:
+        with self.connect() as conn:
+            return row_to_dict(conn.execute("SELECT * FROM life_lessons WHERE id = ?", (lesson_id,)).fetchone())  # type: ignore[return-value]
+
+    def list_quotes(self, query: str = "", limit: int = 20) -> list[dict[str, Any]]:
+        needle = f"%{query.strip()}%"
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM quotes WHERE lower(exact_text) LIKE lower(?) OR lower(coalesce(speaker, '')) LIKE lower(?) OR lower(coalesce(source_label, '')) LIKE lower(?) OR lower(coalesce(source_locator, '')) LIKE lower(?) ORDER BY created_at DESC LIMIT ?""",
+                (needle, needle, needle, needle, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_life_lessons(self, query: str = "", limit: int = 20) -> list[dict[str, Any]]:
+        needle = f"%{query.strip()}%"
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM life_lessons WHERE lower(lesson_text) LIKE lower(?) ORDER BY created_at DESC LIMIT ?",
+                (needle, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def get_person_by_name(self, display_name: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             return row_to_dict(conn.execute("SELECT * FROM people WHERE normalized_name = ?", (display_name.lower(),)).fetchone())
@@ -321,6 +353,96 @@ class CaptureService:
     def __init__(self, store: KnowledgeStore, agent_name: str = "coordinator"):
         self.store = store
         self.agent_name = agent_name
+
+    def capture_quote(
+        self,
+        *,
+        exact_text: str,
+        speaker: str | None = None,
+        source_label: str | None = None,
+        source_locator: str | None = None,
+        attribution_confidence: int = 50,
+        attribution_status: str = "unknown",
+        privacy_scope: str = "personal",
+        raw_text: str | None = None,
+    ) -> StructuredCaptureResult:
+        if not exact_text.strip():
+            raise ValueError("Quote text must not be blank")
+        if not 0 <= attribution_confidence <= 100:
+            raise ValueError("Attribution confidence must be between 0 and 100")
+        if attribution_status not in {"verified", "likely", "unknown", "misattributed_warning", "personal"}:
+            raise ValueError("Invalid attribution status")
+        capture_id = new_id()
+        quote_id = new_id()
+        with self.store.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO raw_captures
+                    (id, raw_text, source_type, source_ref, source_vault, captured_at, captured_by, privacy_scope)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    capture_id,
+                    raw_text or f"Quote captured via structured input: {exact_text}",
+                    "quote",
+                    source_locator,
+                    None,
+                    now_iso(),
+                    self.agent_name,
+                    privacy_scope,
+                ),
+            )
+            self.store._event(conn, "raw_capture", capture_id, "captured", "Raw quote input captured", self.agent_name)
+            conn.execute(
+                """
+                INSERT INTO quotes
+                    (id, exact_text, speaker, source_label, source_locator, attribution_confidence,
+                     attribution_status, privacy_scope, source_capture_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    quote_id,
+                    exact_text.strip(),
+                    speaker,
+                    source_label,
+                    source_locator,
+                    attribution_confidence,
+                    attribution_status,
+                    privacy_scope,
+                    capture_id,
+                    now_iso(),
+                ),
+            )
+            self.store._event(conn, "quote", quote_id, "created", exact_text.strip(), self.agent_name)
+        return StructuredCaptureResult(capture_id=capture_id, record_id=quote_id)
+
+    def capture_life_lesson(
+        self,
+        *,
+        lesson_text: str,
+        privacy_scope: str = "personal",
+        raw_text: str | None = None,
+    ) -> StructuredCaptureResult:
+        if not lesson_text.strip():
+            raise ValueError("Life lesson text must not be blank")
+        capture_id = new_id()
+        lesson_id = new_id()
+        with self.store.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO raw_captures
+                    (id, raw_text, source_type, source_ref, source_vault, captured_at, captured_by, privacy_scope)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (capture_id, raw_text or f"Life lesson captured via structured input: {lesson_text}", "life_lesson", None, None, now_iso(), self.agent_name, privacy_scope),
+            )
+            self.store._event(conn, "raw_capture", capture_id, "captured", "Raw life lesson input captured", self.agent_name)
+            conn.execute(
+                "INSERT INTO life_lessons (id, lesson_text, privacy_scope, source_capture_id, created_at) VALUES (?, ?, ?, ?, ?)",
+                (lesson_id, lesson_text.strip(), privacy_scope, capture_id, now_iso()),
+            )
+            self.store._event(conn, "life_lesson", lesson_id, "created", lesson_text.strip(), self.agent_name)
+        return StructuredCaptureResult(capture_id=capture_id, record_id=lesson_id)
 
     def capture(self, raw_text: str, *, source_type: str = "direct_input") -> CaptureResult:
         text = raw_text.strip()
@@ -484,6 +606,30 @@ CREATE TABLE IF NOT EXISTS activity_events (
     metadata_json TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS quotes (
+    id TEXT PRIMARY KEY,
+    exact_text TEXT NOT NULL CHECK (trim(exact_text) <> ''),
+    speaker TEXT,
+    source_label TEXT,
+    source_locator TEXT,
+    attribution_confidence INTEGER NOT NULL DEFAULT 50 CHECK (attribution_confidence BETWEEN 0 AND 100),
+    attribution_status TEXT NOT NULL DEFAULT 'unknown' CHECK (attribution_status IN ('verified', 'likely', 'unknown', 'misattributed_warning', 'personal')),
+    privacy_scope TEXT NOT NULL,
+    source_capture_id TEXT NOT NULL REFERENCES raw_captures(id),
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS life_lessons (
+    id TEXT PRIMARY KEY,
+    lesson_text TEXT NOT NULL CHECK (trim(lesson_text) <> ''),
+    privacy_scope TEXT NOT NULL,
+    source_capture_id TEXT NOT NULL REFERENCES raw_captures(id),
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_quotes_created_at ON quotes(created_at);
+CREATE INDEX IF NOT EXISTS idx_quotes_speaker ON quotes(speaker);
+CREATE INDEX IF NOT EXISTS idx_life_lessons_created_at ON life_lessons(created_at);
 CREATE INDEX IF NOT EXISTS idx_raw_captures_scope ON raw_captures(privacy_scope);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_scope ON tasks(privacy_scope);
