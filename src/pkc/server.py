@@ -97,7 +97,7 @@ class CoordinatorHandler(BaseHTTPRequestHandler):
         return
 
     def _json(self, payload: object, status: HTTPStatus = HTTPStatus.OK) -> None:
-        body = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
+        body = json.dumps(payload, indent=2, sort_keys=True, default=str).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
