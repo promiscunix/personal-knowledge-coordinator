@@ -184,18 +184,40 @@ in
       restartSec = 5;
     };
 
+    system.activationScripts.pkc-hermes-state-permissions = {
+      deps = [ "pkc-hermes-profiles" ];
+      text = ''
+        set -eu
+        STATE_DIR=${lib.escapeShellArg cfg.stateDir}
+        HERMES_DIR="$STATE_DIR/hermes"
+        HERMES_HOME="$HERMES_DIR/.hermes"
+
+        # The coordinator must be able to traverse the state root and write all
+        # Hermes runtime state, including Telegram's pairing directory, after every
+        # rebuild. Limit recursive ownership/mode repair to the Hermes state tree.
+        chgrp hermes-agents "$STATE_DIR"
+        chmod 0750 "$STATE_DIR"
+        install -d -m 0750 -o coordinator -g hermes-agents "$STATE_DIR/workspace"
+        install -d -m 0750 -o coordinator -g hermes-agents "$HERMES_DIR"
+        install -d -m 0750 -o coordinator -g hermes-agents "$HERMES_HOME/platforms/pairing"
+        find "$HERMES_DIR" -type d -exec chown coordinator:hermes-agents {} + -exec chmod 0750 {} +
+        find "$HERMES_DIR" -type f -exec chown coordinator:hermes-agents {} + -exec chmod 0600 {} +
+      '';
+    };
+
     system.activationScripts.pkc-hermes-profiles = ''
             set -eu
             HERMES_HOME=${lib.escapeShellArg "${cfg.stateDir}/hermes/.hermes"}
             install -d -m 0750 -o coordinator -g hermes-agents "$HERMES_HOME/profiles"
             ${lib.concatMapStringsSep "\n" (role: ''
-              install -d -m 0750 -o ${role} -g hermes-agents "$HERMES_HOME/profiles/${role}"
+              install -d -m 0750 -o coordinator -g hermes-agents "$HERMES_HOME/profiles/${role}"
               cat > "$HERMES_HOME/profiles/${role}/SOUL.md" <<'EOF'
       # ${role}
 
       Role account for the Personal Knowledge Coordinator system. Follow the scope and approval boundaries documented in the repository. Use persistent task/knowledge records rather than treating chat context as memory.
       EOF
-              chown ${role}:hermes-agents "$HERMES_HOME/profiles/${role}/SOUL.md"
+              chown coordinator:hermes-agents "$HERMES_HOME/profiles/${role}/SOUL.md"
+              chmod 0600 "$HERMES_HOME/profiles/${role}/SOUL.md"
             '') roles}
     '';
 
